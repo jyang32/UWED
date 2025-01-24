@@ -37,3 +37,9 @@ remove_observations <- function(address) {
   }
   return(TRUE)
 }
+
+# ASCII Characters ####
+# Function to check if a string contains non-ASCII characters
+contains_non_ascii <- function(s) {
+  any(charToRaw(s) > 127)
+}
