@@ -15,49 +15,42 @@
 #### SET LIBRARY PATH ####
 
 #pull packages from the project site_libs - also install packages here if needed
-.libPaths('R:/Project/UWED/Master Team Folder/Code/site_libs/')
+.libPaths('~/win/project/UWED/Master Team Folder/Code/site_libs/')
+
+source("Keys.R")
 
 #### LOAD PACKAGES ####
+## R version 4.1.3 ##
 
-pacman::p_load(tidyverse,
-               tidycensus,
-               tigris,
-               sf,
-               sp,
-               janitor,
-               wru)
+library(tidyverse)
+library(tidycensus)
+library(tigris)
+library(sf)
+library(sp)
+library(janitor)
+library(wru)
 
 
 #### READ IN ADDRESS W GPS COORD DATA ####
 
-res1 <- readRDS("R:/Project/UWED/Master Team Folder/Data/Outputs/all_geocoded_addresses.RDS") %>%
-    filter(!is.na(Longitude) & !is.na(Latitude))
-res2 <- read.csv("R:/Project/UWED/Master Team Folder/Data/Outputs/aws_geocoded_all_20241209.csv")
-
-#combine and save
-colnames(res2) <- c("Address", "Longitude", "Latitude")
-res <- rbind(res1, res2)
-res <- res %>%
-    distinct(Address, .keep_all=T) %>%
-    filter(!is.na(Longitude) & !is.na(Latitude))
-saveRDS(res, "R:/Project/UWED/Master Team Folder/Data/Outputs/all_geocoded_addresses.RDS")
-rm(res1, res2)
-gc()
+res <- readRDS("~/win/project/UWED/Master Team Folder/Data/Outputs/all_geocoded_addresses_Jan2025_batch.RDS")
 
 #Convert to spatial pts object
 res <- st_as_sf(res, coords = c("Longitude", "Latitude"))
 
 #Read in most recent block group shapefile from ACS - using a random variable that I then drop
-key <- "537aca394fc0bf9d2c93a0f1adc0ca634d36c8d4"
+
 bg <- get_acs(geography = 'block group',
               variables = 'B19013_001',
               state = state.abb,
               geometry = TRUE,
-              key = key) %>%
+              key = census_api_key) %>%
     select(-variable, -estimate, -moe)
 
-#Read in tribal boundaries shapefile
-tribe_shp <- read_sf('R:/Project/UWED/Master Team Folder/Data/Inputs/Outside/tl_2018_us_aiannh/tl_2018_us_aiannh.shp')
+# Read in tribal boundaries shapefile
+## Updated into 2024 shapefile
+
+tribe_shp <- read_sf('~/win/project/UWED/Master Team Folder/Data/Inputs/Outside/tl_2024_us_aiannh/tl_2024_us_aiannh.shp')
 wa <- states() %>% filter(NAME == "Washington")
 st_crs(tribe_shp) <- st_crs(wa)
 tribe_shp <- st_crop(tribe_shp, wa) %>% select(!GEOID)
@@ -69,15 +62,32 @@ sf_use_s2(FALSE)
 
 #Do the overlay, separate geo information into columns
 #st_intersects might be more efficient
-res_loc <- st_join(res, bg,
-                   join = st_intersects) %>%
-    separate(NAME, c('Block Group', 'Tract', 'County', 'State'), sep = ',')
+# res_loc <- st_join(res, bg,
+#                    join = st_intersects) %>%
+#     separate(NAME, c('Block Group', 'Tract', 'County', 'State'), sep = ',')
+#
+# res_loc <- st_join(res_loc, tribe_shp)
 
-res_loc <- st_join(res_loc, tribe_shp)
+# Preprocess the `bg` dataset to split the NAME column into parts
+bg <- bg %>%
+    separate(
+        NAME,
+        into = c("Block Group", "Census Tract", "County", "State"),
+        sep = "; ",
+        remove = FALSE
+    )
+
+# Combine `bg` with tribal boundaries
+## This step is to include additional attributes from the tribal shp,
+## Additional rows will be added due to one block group may contain multiple tribes
+bg_combined <- st_join(bg, tribe_shp, join = st_intersects)
+
+# Perform a single spatial join with `res` (3 minutes in total from line 72)
+res_loc <- st_join(res, bg_combined, join = st_intersects)
 
 #Save all addresses located within census and tribal geographies
 
-st_write(res_loc, "R:/Project/UWED/Master Team Folder/Data/Outputs/all_address_census_tribe_joined.shp", append = F)
+st_write(res_loc, "~/win/project/UWED/Master Team Folder/Data/Outputs/all_address_census_tribe_joined_01272025.shp", append = F)
 
 #### READ ISSUANCES ####
 # Specify the file path - only read in new files
