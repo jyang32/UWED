@@ -18,6 +18,7 @@
 .libPaths('~/win/project/UWED/Master Team Folder/Code/site_libs/')
 
 source("Keys.R")
+source("00_helper_fns.R")
 
 #### LOAD PACKAGES ####
 ## R version 4.1.3 ##
@@ -29,6 +30,8 @@ library(sf)
 library(sp)
 library(janitor)
 library(wru)
+library(fs)
+library(reader)
 
 
 #### READ IN ADDRESS W GPS COORD DATA ####
@@ -91,36 +94,27 @@ st_write(res_loc, "~/win/project/UWED/Master Team Folder/Data/Outputs/all_addres
 
 #### READ ISSUANCES ####
 # Specify the file path - only read in new files
-issuances_path <- "R:/Project/UWED/Master Team Folder/Data/Inputs/SoS/Ballot_Issuances"
+## Change into "R:/Project/" when using Windows
+issuances_path <- "~/win/project/UWED/Master Team Folder/Data/Inputs/SoS/Ballot_Issuances/"
 
-old_files <- read_csv("R:/Project/UWED/Master Team Folder/Data/Inputs/SoS/Ballot_Issuances/current_file_names.csv")
+old_files <- read_csv(paste0(issuances_path,"current_file_names.csv"))
 
-issuances_txt_files <- list.files(issuances_path, pattern = "\\.txt$", full.names = TRUE)
-new_files <- issuances_txt_files#[!issuances_txt_files %in% old_files$issuances_txt_files]
+issuances_txt_files <- list.files(issuances_path, pattern = "\\.txt$", full.names = FALSE)
+
+new_files <- issuances_txt_files[!issuances_txt_files %in% old_files$issuances_txt_files]
+
+# run once, can be optimized
+new_files_full <- paste0(issuances_path, new_files)
 
 ###
 
-# Initialize an empty list to store the data frames
-issuances_list <- list()
+# Read all files, convert columns to character, and combine into one data frame
+issuances <- bind_rows(lapply(new_files_full, function(file) {
+    read_delim(file, delim = "|", na = "", col_types = cols(), quote = "") %>%
+        mutate(across(everything(), as.character))
+}))
 
-# Loop over the file names
-for (i in 1:length(new_files)) {
-    # Read the data from the file and create data frame
-    #read_delim faster than read.table, strings as factors in this?
-    issuances_df <- read.table(new_files[i], sep="|", header=T, na.strings = "", fill=T, quote = "", comment.char = "")
 
-    # Add the data frame to the list
-    issuances_list[[i]] <- issuances_df
-}
-
-# Convert every variable in each data frame to a character
-issuances_list <- lapply(issuances_list, function(df) {
-    data.frame(lapply(df, as.character), stringsAsFactors = FALSE)
-})
-
-# rbind all data frames in the list
-# issuances_df <- do.call(issuances_list, rbind.data.frame)
-issuances <- bind_rows(issuances_list)
 
 ### BEFORE COLLAPSING ADDRESS DATA, IDENTIFY OBS WITH ADDRESS MISSINGNESS ###
 issuances <- issuances %>%
@@ -129,49 +123,30 @@ issuances <- issuances %>%
 table(issuances$Any_NA)
 #7/20/24 - 10% of issuances have a missing address
 #12/11/24 - .5% of issuances have some part of address missing (most of them international)
+#1/27/25 - .1% of issuances have some part of address missing (most of them international)
 
 # collapse address data
 issuances <- issuances %>%
     unite(col = "Address", Address, City, State, Zip, sep = ', ', remove = F) %>%
     mutate(Address = str_squish(Address))
 
-rm(issuances_df, issuances_list); gc()
 
 #now remove obs with missingness from res_loc
-res_loc <- res_loc[!res_loc$Address %in% issuances$Address[issuances$Any_NA==1],]
 
-#### GUESS VRDB DELIMITER ####
-
-guessDelimiter <- function(file_path, num_lines = 50) {
-    # Read the first few lines of the file
-    lines <- readLines(file_path, n = num_lines)
-
-    # Define a list of possible delimiters
-    possible_delimiters <- c(",", "\t", ";", "|", " ")
-
-    # Initialize a vector to count delimiter occurrences
-    delimiter_counts <- numeric(length(possible_delimiters))
-
-    for (i in seq_along(possible_delimiters)) {
-        # Count how many times each delimiter appears in the first few lines
-        delimiter_counts[i] <- sum(sapply(lines, function(line) sum(str_count(line, fixed(possible_delimiters[i])))))
-    }
-
-    # Find the delimiter with the highest count
-    guessed_delimiter <- possible_delimiters[which.max(delimiter_counts)]
-
-    return(guessed_delimiter)
-}
+res_loc <- res_loc %>%
+    anti_join(issuances %>% filter(Any_NA == 1), by = "Address")
 
 #Specify the file path
-vrdb_path <- "R:/Project/UWED/Master Team Folder/Data/Inputs/SoS/VRDB/"
+#Windows user: "R:/Project/UWED/
 
-old_files <- read_csv("R:/Project/UWED/Master Team Folder/Data/Inputs/SoS/VRDB/current_file_names.csv")
+vrdb_path <- "~/win/project/UWED/Master Team Folder/Data/Inputs/SoS/VRDB/"
+
+old_files <- read_csv("~/win/project/UWED/Master Team Folder/Data/Inputs/SoS/VRDB/current_file_names.csv")
 
 vrdb_txt_files <- list.files(vrdb_path, pattern = "\\.txt$")
 vrdb_txt_files <- vrdb_txt_files[grepl("VRDB", vrdb_txt_files)]
 
-new_files <- vrdb_txt_files#[!vrdb_txt_files %in% old_files$vrdb_txt_files]
+new_files <- vrdb_txt_files[!vrdb_txt_files %in% old_files$vrdb_txt_files]
 
 #### READ VRDB ####
 
