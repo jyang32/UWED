@@ -15,7 +15,7 @@
 #### SET LIBRARY PATH ####
 
 #pull packages from the project site_libs - also install packages here if needed
-.libPaths('~/win/project/UWED/Master Team Folder/Code/site_libs/')
+# .libPaths('~/win/project/UWED/Master Team Folder/Code/site_libs/')
 
 source("Keys.R")
 source("00_helper_fns.R")
@@ -32,6 +32,8 @@ library(janitor)
 library(wru)
 library(fs)
 library(reader)
+library(data.table)
+
 
 
 #### READ IN ADDRESS W GPS COORD DATA ####
@@ -42,10 +44,12 @@ res <- readRDS("~/win/project/UWED/Master Team Folder/Data/Outputs/all_geocoded_
 res <- st_as_sf(res, coords = c("Longitude", "Latitude"))
 
 #Read in most recent block group shapefile from ACS - using a random variable that I then drop
+#Read cache files
+#options(tigris_use_cache = TRUE)
 
 bg <- get_acs(geography = 'block group',
               variables = 'B19013_001',
-              state = state.abb,
+              state = state.abb, #WA?
               geometry = TRUE,
               key = census_api_key) %>%
     select(-variable, -estimate, -moe)
@@ -54,6 +58,8 @@ bg <- get_acs(geography = 'block group',
 ## Updated into 2024 shapefile
 
 tribe_shp <- read_sf('~/win/project/UWED/Master Team Folder/Data/Inputs/Outside/tl_2024_us_aiannh/tl_2024_us_aiannh.shp')
+#Note! There is an additional column from 2024 tribal shape file, "GEOIDFQ", which results in a mismatch between old and new Imputed files
+
 wa <- states() %>% filter(NAME == "Washington")
 st_crs(tribe_shp) <- st_crs(wa)
 tribe_shp <- st_crop(tribe_shp, wa) %>% select(!GEOID)
@@ -64,20 +70,13 @@ st_crs(tribe_shp) <- st_crs(bg)
 sf_use_s2(FALSE)
 
 #Do the overlay, separate geo information into columns
-#st_intersects might be more efficient
-# res_loc <- st_join(res, bg,
-#                    join = st_intersects) %>%
-#     separate(NAME, c('Block Group', 'Tract', 'County', 'State'), sep = ',')
-#
-# res_loc <- st_join(res_loc, tribe_shp)
-
 # Preprocess the `bg` dataset to split the NAME column into parts
 bg <- bg %>%
     separate(
         NAME,
-        into = c("Block Group", "Census Tract", "County", "State"),
+        into = c("Block Group", "Tract", "County", "State"),
         sep = "; ",
-        remove = FALSE
+        remove = TRUE
     )
 
 # Combine `bg` with tribal boundaries
@@ -90,7 +89,7 @@ res_loc <- st_join(res, bg_combined, join = st_intersects)
 
 #Save all addresses located within census and tribal geographies
 
-st_write(res_loc, "~/win/project/UWED/Master Team Folder/Data/Outputs/all_address_census_tribe_joined_01272025.shp", append = F)
+# st_write(res_loc, "~/win/project/UWED/Master Team Folder/Data/Outputs/all_address_census_tribe_joined_01272025.shp", append = F)
 
 #### READ ISSUANCES ####
 # Specify the file path - only read in new files
@@ -149,58 +148,52 @@ vrdb_txt_files <- vrdb_txt_files[grepl("VRDB", vrdb_txt_files)]
 new_files <- vrdb_txt_files[!vrdb_txt_files %in% old_files$vrdb_txt_files]
 
 #### READ VRDB ####
+# Initialize a list to store file names and guessed delimiters
+delimiters_list <- vector("list", length(vrdb_txt_files))
 
-# Initialize a data frame to store file names and their guessed delimiters
-delimiters_df <- data.frame(FileName = character(), GuessedDelimiter = character(), stringsAsFactors = FALSE)
+# Loop over the files and guess delimiters
+for (i in seq_along(vrdb_txt_files)) {
+    guessed_delimiter <- guessDelimiter(paste0(vrdb_path, vrdb_txt_files[i]))
 
-# Loop over the files and apply the guessDelimiter function
-for (file in vrdb_txt_files) {
-    guessed_delimiter <- guessDelimiter(paste0(vrdb_path, file))
-
-    # Add the file name and its guessed delimiter to the data frame
-    delimiters_df <- rbind(delimiters_df, data.frame(FileName = basename(file), GuessedDelimiter = guessed_delimiter))
+    # Store results in the list
+    delimiters_list[[i]] <- list(FileName = basename(vrdb_txt_files[i]), GuessedDelimiter = guessed_delimiter)
 }
 
-delimiters_df$GuessedDelimiter[delimiters_df$GuessedDelimiter==" "] <- "\t"
-if(nrow(delimiters_df)==16){delimiters_df$GuessedDelimiter[4] <- "|"}
+# Convert the list to a data frame
+delimiters_df <- do.call(rbind, lapply(delimiters_list, as.data.frame))
 
+# Replace " " delimiters with "\t"
+delimiters_df$GuessedDelimiter[delimiters_df$GuessedDelimiter == " "] <- "\t"
+
+# Handle special case: Ensure the delimiter for the 4th file is "|", if there are 16 rows
+## ??? Don't understand what this mean
+if (nrow(delimiters_df) == 16) {
+    delimiters_df$GuessedDelimiter[4] <- "|"
+}
 ### Loading VRDB Files ###
 
-# Initialize an empty list to store the data frames
-vrdb_list <- list()
+# Define base path for VRDB files
+vrdb_base_path <- "~/win/project/UWED/Master Team Folder/Data/Inputs/SoS/VRDB/"
 
-#load the files
-# Loop over the file names
-for (i in 1:length(new_files)) {
-    # Extract the file name
-    file_name <- new_files[i]
-
-    # Find the guessed delimiter for the current file
+# Read and process all files in one step
+vrdb <- bind_rows(lapply(new_files, function(file_name) {
+    # Find guessed delimiter or use default "|"
     guessed_delimiter <- delimiters_df$GuessedDelimiter[delimiters_df$FileName == file_name]
+    guessed_delimiter <- ifelse(length(guessed_delimiter) == 0, "|", guessed_delimiter)
 
-    # Check if a guessed delimiter was found, if not, default to "|"
-    if (length(guessed_delimiter) == 0) {
-        guessed_delimiter <- "|"
-    }
-
-    # Read the data from the file using the guessed delimiter
-    vrdb_df <- read.table(paste0("R:/Project/UWED/Master Team Folder/Data/Inputs/SoS/VRDB/", file_name),
+    # Read the data from the file
+    vrdb_df <- read.table(paste0(vrdb_base_path, file_name),
                           sep = guessed_delimiter, header = TRUE, na.strings = "", fill = TRUE, quote = "", comment.char = "")
 
-    # Extract year from file name
+    # Extract year from file name and add as a column
     vrdb_df <- vrdb_df %>%
         mutate(Year = substr(file_name, 1, 4))
-    # Add the data frame to the list
-    vrdb_list[[i]] <- vrdb_df
-}
 
-# Convert every variable in each data frame to a character
-vrdb_list <- lapply(vrdb_list, function(df) {
-    data.frame(lapply(df, as.character), stringsAsFactors = FALSE)
-})
+    # Convert all columns to character
+    vrdb_df <- data.frame(lapply(vrdb_df, as.character), stringsAsFactors = FALSE)
 
-# rbind all data frames in the list
-vrdb <- bind_rows(vrdb_list)
+    return(vrdb_df)
+}))
 
 #Put together address variable to match the geocoded data
 vrdb <- vrdb %>%
@@ -211,41 +204,70 @@ vrdb <- vrdb %>%
 vrdb <- vrdb %>%
     mutate(Any_NA = ifelse(rowSums(is.na(select(., Address, RegCity, RegState, RegZipCode))) > 0, 1, 0))
 
+table(vrdb$Any_NA)
+# Jan 2025 batch has extremely small proportion of missing addresses (46 out of 5553k)
+
 #collapse address
 vrdb <- vrdb %>%
     unite(col = "Address", Address, RegCity, RegState, RegZipCode, sep = ', ', remove = F)
 
-rm(vrdb_df, vrdb_list); gc()
 
 #now remove obs with missingness from res_loc
-res_loc <- res_loc[!res_loc$Address %in% vrdb$Address[vrdb$Any_NA==1],]
+
+res_loc <- res_loc %>%
+    anti_join(vrdb %>% filter(Any_NA == 1), by = "Address")
 
 #Unique values from issuances and vrdb file on YEAR, NAME, VOTER ID, ADDRESS
 #Look for duplicate voter IDs where one has an address and one does not, keep the one with an address
 
-combined_df <- bind_rows(
-    vrdb %>%
-        select(FName, LName, StateVoterID, Year, Address, RegState) %>%
-        rename(
-            Voter.ID = StateVoterID,
-            First.Name = FName,
-            Last.Name = LName,
-            State = RegState
-        )
-    ,
-    issuances %>%
-        mutate(Year = substr(Election, nchar(Election)-3, nchar(Election)),
-               Voter.ID = paste0("WA", Voter.ID)) %>%
-        select(First.Name, Last.Name, Voter.ID, Year, Address, State))
+setDT(vrdb)
+vrdb <- vrdb[, .(
+    First.Name = FName,
+    Last.Name = LName,
+    Voter.ID = StateVoterID,
+    Year,
+    Address,
+    State = RegState
+)]
+
+setDT(issuances)
+
+# Rename and select columns to match vrdb
+issuances <- issuances[, .(
+    First.Name = `First Name`,
+    Last.Name = `Last Name`,
+    #Voter.ID = paste0("WA", `Voter ID`),  # Prefix Voter ID with "WA" Why?
+    Voter.ID = `Voter ID`,
+    Year = substr(Election, nchar(Election) - 3, nchar(Election)), # Extract Year from Election
+    Address,
+    State
+)]
+
+# Combine data tables
+combined_df <- rbindlist( # Prefix of WA was dropped?
+    list(vrdb, issuances),
+    use.names = TRUE,
+    fill = TRUE
+)
+
+# Remove duplicates
+distinct_df <- unique(combined_df)
+# JY question: what keys identify a unique voter? What if one voter has different addresses?
+# distinct_df[order(-First.Name)][1:15]
 
 
-distinct_df <- combined_df %>%
-    distinct(.keep_all = TRUE)
-
+# JY - no code optimization was performed starting this line and below
 #### RACE IMPUTATION ####
 
 #Merge and filter to the names with geocoded matches (should be all with a full sample)
 #Change variable names for wru requirements
+
+# Warning message:
+# In left_join(., res_loc, by = "Address") :
+    #Detected an unexpected many-to-many relationship between `x` and `y`.
+# Row 228703 of `x` matches multiple rows in `y`.
+# Row 1789323 of `y` matches multiple rows in `x`.
+# If a many-to-many relationship is expected, set `relationship = "many-to-many"` to silence this warning.
 states <- tibble(state.abb = state.abb, State = state.name)
 
 geo_df <- distinct_df %>%
@@ -261,26 +283,34 @@ geo_df <- distinct_df %>%
     rename(state = state.abb)
 
 geo_df <- geo_df %>%
-    filter(!str_detect(surname, "[^ -~]")) #remove any with non-ASCII characters (106 rows)
+    filter(!str_detect(surname, "[^ -~]")) #remove any with non-ASCII characters
 
-previous_imputed <- readRDS("R:/Project/UWED/Master Team Folder/Data/Outputs/all_imputed.RDS")
+# #### REMOVE PREVIOUSLY IMPUTED INSTANCES ####
+# # Read in previously imputed instances
+# # Read as data.table for faster processing
 
-#### REMOVE PREVIOUSLY IMPUTED INSTANCES ####
-# Read in previously imputed instances
-previous <- previous_imputed %>%
-    select(First.Name, surname, Voter.ID, Year, Address, State)
+previous_imputed <- setDT(readRDS("~/win/project/UWED/Master Team Folder/Data/Outputs/all_imputed.RDS"))
 
-# Filter to only the instances that have not been imputed yet
-geo_df <- geo_df %>%
-    anti_join(previous)
+previous <- previous_imputed[
+    , .(First.Name, surname, Voter.ID, Year, Address, State)
+]
+
+setDT(geo_df)
+
+# Set keys for fast joins
+setkey(previous, First.Name, surname, Voter.ID, Year, Address, State)
+
+# Perform the anti-join
+geo_df <- geo_df[!previous, on = .(First.Name, surname, Voter.ID, Year, Address, State)]
+
 #### BRING IN CENSUS DATA ####
 
 #Pull census data, save to folder if there is a new year to pull
 #census_data <- get_census_data(key = key, states=state.abb, census.geo = "block_group", year = '2010')
 #saveRDS(census_data, "R:/Project/UWED/Master Team Folder/Data/Inputs/Outside/census_data_for_imputation/census_2010.RDS")
 
-census_data_2010 <-readRDS("R:/Project/UWED/Master Team Folder/Data/Inputs/Outside/census_data_for_imputation/census_2010.RDS")
-census_data_2020 <-readRDS("R:/Project/UWED/Master Team Folder/Data/Inputs/Outside/census_data_for_imputation/census_2020.RDS")
+census_data_2010 <-readRDS("~/win/project/UWED/Master Team Folder/Data/Inputs/Outside/census_data_for_imputation/census_2010.RDS")
+census_data_2020 <-readRDS("~/win/project/UWED/Master Team Folder/Data/Inputs/Outside/census_data_for_imputation/census_2020.RDS")
 
 # Impute race at the lowest geography, block group
 # Separated out to refer to the closest census
@@ -309,6 +339,7 @@ preds_2020_bg <- predict_race(voter.file=geo_df_2020_bg,
                               census.key=key,
                               year = '2020',
                               census.data = census_data_2020)
+# JY 10282025: 122617 (9.5%) individuals' last names were not matched.
 
 #Then, impute race for those who don't have tract predictions, but have county
 
@@ -354,20 +385,33 @@ preds_2020_name <- predict_race(voter.file=geo_df_2020_name,
                                 #surname.year = '2020', #this option appears to not exist
                                 census.data = census_data_2020)
 
+# JY 01282025: 32418 (10.3%) individuals' last names were not matched.
+
 #### SAVE DATA ####
 
 # Once the geocoding and imputation has been done successfully, save the text file that names all the files that have already been geocoded and imputed
-write_csv(data.frame(issuances_txt_files), "R:/Project/UWED/Master Team Folder/Data/Inputs/SoS/Ballot_Issuances/current_file_names.csv")
-write_csv(data.frame(vrdb_txt_files), "R:/Project/UWED/Master Team Folder/Data/Inputs/SoS/VRDB/current_file_names.csv")
+write_csv(data.frame(issuances_txt_files), "~/win/project/UWED/Master Team Folder/Data/Inputs/SoS/Ballot_Issuances/current_file_names.csv")
+write_csv(data.frame(vrdb_txt_files), "~/win/project/UWED/Master Team Folder/Data/Inputs/SoS/VRDB/current_file_names.csv")
 
 #bind imputed race files that are in the environment
 environment <- ls()
-to_bind <- c("previous_imputed",
-             "preds_2010_bg", "preds_2020_bg",
+to_bind <- c("preds_2010_bg", "preds_2020_bg",
              "preds_2010_cty", "preds_2020_cty",
              "preds_2010_name", "preds_2020_name")
 to_bind <- to_bind[to_bind %in% environment]
-all_preds <- do.call(bind_rows, mget(to_bind))
+new_preds <- do.call(bind_rows, mget(to_bind)) # before binding with the previous_imputed
 
-saveRDS(all_preds, "R:/Project/UWED/Master Team Folder/Data/Outputs/all_imputed.RDS")
+# Have to harmonize the columns before appending RDS and fst files
+## Due to differences in 2018 and 2024 tribal shape files
+## Removing the GEOIDFQ column and turn into data.table for faster processing
+
+new_preds <- setDT(new_preds %>%
+    select(-(GEOIDFQ)))
+
+all_preds <- rbindlist(list(previous_imputed, new_preds),
+                       use.names = TRUE,
+                       fill = TRUE)
+
+saveRDS(all_preds, "~/win/project/UWED/Master Team Folder/Data/Outputs/all_imputed_01282025.RDS")
+
 
