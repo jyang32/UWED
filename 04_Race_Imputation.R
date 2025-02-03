@@ -15,7 +15,7 @@
 #### SET LIBRARY PATH ####
 
 #pull packages from the project site_libs - also install packages here if needed
-# .libPaths('~/win/project/UWED/Master Team Folder/Code/site_libs/')
+# .libPaths('R:/Project/UWED/Master Team Folder/Code/site_libs/')
 
 source("Keys.R")
 source("00_helper_fns.R")
@@ -38,7 +38,7 @@ library(data.table)
 
 #### READ IN ADDRESS W GPS COORD DATA ####
 
-res <- readRDS("~/win/project/UWED/Master Team Folder/Data/Outputs/all_geocoded_addresses_Jan2025_batch.RDS")
+res <- readRDS("R:/Project/UWED/Master Team Folder/Data/Outputs/all_geocoded_addresses_Jan2025_batch.RDS")
 
 #Convert to spatial pts object
 res <- st_as_sf(res, coords = c("Longitude", "Latitude"))
@@ -57,7 +57,7 @@ bg <- get_acs(geography = 'block group',
 # Read in tribal boundaries shapefile
 ## Updated into 2024 shapefile
 
-tribe_shp <- read_sf('~/win/project/UWED/Master Team Folder/Data/Inputs/Outside/tl_2024_us_aiannh/tl_2024_us_aiannh.shp')
+tribe_shp <- read_sf('R:/Project/UWED/Master Team Folder/Data/Inputs/Outside/tl_2024_us_aiannh/tl_2024_us_aiannh.shp')
 #Note! There is an additional column from 2024 tribal shape file, "GEOIDFQ", which results in a mismatch between old and new Imputed files
 
 wa <- states() %>% filter(NAME == "Washington")
@@ -89,12 +89,12 @@ res_loc <- st_join(res, bg_combined, join = st_intersects)
 
 #Save all addresses located within census and tribal geographies
 
-# st_write(res_loc, "~/win/project/UWED/Master Team Folder/Data/Outputs/all_address_census_tribe_joined_01272025.shp", append = F)
+# st_write(res_loc, "R:/Project/UWED/Master Team Folder/Data/Outputs/all_address_census_tribe_joined_01272025.shp", append = F)
 
 #### READ ISSUANCES ####
 # Specify the file path - only read in new files
 ## Change into "R:/Project/" when using Windows
-issuances_path <- "~/win/project/UWED/Master Team Folder/Data/Inputs/SoS/Ballot_Issuances/"
+issuances_path <- "R:/Project/UWED/Master Team Folder/Data/Inputs/SoS/Ballot_Issuances/"
 
 old_files <- read_csv(paste0(issuances_path,"current_file_names.csv"))
 
@@ -138,9 +138,9 @@ res_loc <- res_loc %>%
 #Specify the file path
 #Windows user: "R:/Project/UWED/
 
-vrdb_path <- "~/win/project/UWED/Master Team Folder/Data/Inputs/SoS/VRDB/"
+vrdb_path <- "R:/Project/UWED/Master Team Folder/Data/Inputs/SoS/VRDB/"
 
-old_files <- read_csv("~/win/project/UWED/Master Team Folder/Data/Inputs/SoS/VRDB/current_file_names.csv")
+old_files <- read_csv("R:/Project/UWED/Master Team Folder/Data/Inputs/SoS/VRDB/current_file_names.csv")
 
 vrdb_txt_files <- list.files(vrdb_path, pattern = "\\.txt$")
 vrdb_txt_files <- vrdb_txt_files[grepl("VRDB", vrdb_txt_files)]
@@ -173,7 +173,7 @@ if (nrow(delimiters_df) == 16) {
 ### Loading VRDB Files ###
 
 # Define base path for VRDB files
-vrdb_base_path <- "~/win/project/UWED/Master Team Folder/Data/Inputs/SoS/VRDB/"
+vrdb_base_path <- "R:/Project/UWED/Master Team Folder/Data/Inputs/SoS/VRDB/"
 
 # Read and process all files in one step
 vrdb <- bind_rows(lapply(new_files, function(file_name) {
@@ -289,7 +289,7 @@ geo_df <- geo_df %>%
 # # Read in previously imputed instances
 # # Read as data.table for faster processing
 
-previous_imputed <- setDT(readRDS("~/win/project/UWED/Master Team Folder/Data/Outputs/all_imputed.RDS"))
+previous_imputed <- setDT(readRDS("R:/Project/UWED/Master Team Folder/Data/Outputs/all_imputed.RDS"))
 
 previous <- previous_imputed[
     , .(First.Name, surname, Voter.ID, Year, Address, State)
@@ -309,8 +309,8 @@ geo_df <- geo_df[!previous, on = .(First.Name, surname, Voter.ID, Year, Address,
 #census_data <- get_census_data(key = key, states=state.abb, census.geo = "block_group", year = '2010')
 #saveRDS(census_data, "R:/Project/UWED/Master Team Folder/Data/Inputs/Outside/census_data_for_imputation/census_2010.RDS")
 
-census_data_2010 <-readRDS("~/win/project/UWED/Master Team Folder/Data/Inputs/Outside/census_data_for_imputation/census_2010.RDS")
-census_data_2020 <-readRDS("~/win/project/UWED/Master Team Folder/Data/Inputs/Outside/census_data_for_imputation/census_2020.RDS")
+census_data_2010 <-readRDS("R:/Project/UWED/Master Team Folder/Data/Inputs/Outside/census_data_for_imputation/census_2010.RDS")
+census_data_2020 <-readRDS("R:/Project/UWED/Master Team Folder/Data/Inputs/Outside/census_data_for_imputation/census_2020.RDS")
 
 # Impute race at the lowest geography, block group
 # Separated out to refer to the closest census
@@ -390,8 +390,8 @@ preds_2020_name <- predict_race(voter.file=geo_df_2020_name,
 #### SAVE DATA ####
 
 # Once the geocoding and imputation has been done successfully, save the text file that names all the files that have already been geocoded and imputed
-write_csv(data.frame(issuances_txt_files), "~/win/project/UWED/Master Team Folder/Data/Inputs/SoS/Ballot_Issuances/current_file_names.csv")
-write_csv(data.frame(vrdb_txt_files), "~/win/project/UWED/Master Team Folder/Data/Inputs/SoS/VRDB/current_file_names.csv")
+write_csv(data.frame(issuances_txt_files), "R:/Project/UWED/Master Team Folder/Data/Inputs/SoS/Ballot_Issuances/current_file_names.csv")
+write_csv(data.frame(vrdb_txt_files), "R:/Project/UWED/Master Team Folder/Data/Inputs/SoS/VRDB/current_file_names.csv")
 
 #bind imputed race files that are in the environment
 environment <- ls()
@@ -412,6 +412,6 @@ all_preds <- rbindlist(list(previous_imputed, new_preds),
                        use.names = TRUE,
                        fill = TRUE)
 
-saveRDS(all_preds, "~/win/project/UWED/Master Team Folder/Data/Outputs/all_imputed_01282025.RDS")
+saveRDS(all_preds, "R:/Project/UWED/Master Team Folder/Data/Outputs/all_imputed_01282025.RDS")
 
 
