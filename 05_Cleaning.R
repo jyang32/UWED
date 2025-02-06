@@ -102,10 +102,8 @@ for (i in 1:length(vrdb_txt_files)) {
     vrdb_df <- read.table(paste0(vrdb_path, vrdb_txt_files[i]),
                           sep = guessed_delimiter, header = TRUE, na.strings = "", fill = TRUE, quote = "")
 
-    # Filter for "Active" in the StatusCode column
-    if ("StatusCode" %in% colnames(vrdb_df)) {
-        vrdb_df <- vrdb_df[vrdb_df$StatusCode == "Active", ]
-    }
+    # Filter for "Active" in the StatusCode column, removing NAs
+    vrdb_df <- vrdb_df[!is.na(vrdb_df$StatusCode) & vrdb_df$StatusCode == "Active", ]
 
     # Add the data frame to the list
     vrdb_list[[i]] <- vrdb_df
