@@ -103,7 +103,8 @@ for (i in 1:length(vrdb_txt_files)) {
                           sep = guessed_delimiter, header = TRUE, na.strings = "", fill = TRUE, quote = "")
 
     # Filter for "Active" in the StatusCode column, removing NAs
-    vrdb_df <- vrdb_df[!is.na(vrdb_df$StatusCode) & vrdb_df$StatusCode == "Active", ]
+    # Note in some files, it is "A" and in 2008 file, "A     "
+    vrdb_df <- vrdb_df[!is.na(vrdb_df$StatusCode) & vrdb_df$StatusCode %in% c("Active", "A","A     "), ]
 
     # Add the data frame to the list
     vrdb_list[[i]] <- vrdb_df
